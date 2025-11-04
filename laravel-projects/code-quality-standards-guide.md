@@ -17,6 +17,44 @@ This guide covers implementing consistent code quality standards across all proj
 
 ---
 
+## Prerequisites & Version Requirements
+
+Before starting, ensure your environment meets these requirements:
+
+### Required Versions
+- **PHP**: 8.2 or higher (8.3+ recommended)
+- **Laravel**: 10.x or 11.x (Laravel 12+ also supported)
+- **Composer**: 2.x
+- **Git**: 2.x
+
+### System Requirements
+- **Operating System**: macOS, Linux, or Windows (WSL recommended for Windows)
+- **Memory**: Minimum 2GB RAM (4GB+ recommended for large projects)
+- **Disk Space**: ~500MB for dependencies
+
+### Verify Your Setup
+
+```bash
+# Check PHP version
+php -v  # Should be 8.2+
+
+# Check Laravel version
+php artisan --version
+
+# Check Composer version
+composer --version
+
+# Check Git version
+git --version
+```
+
+### Compatibility Notes
+- **PHP 8.1**: May work but not recommended; some features require PHP 8.2+
+- **Laravel 9.x**: Should work, but Laravel 10+ is recommended
+- **Windows**: Use WSL2 for best compatibility with bash scripts (pre-commit hooks)
+
+---
+
 ## Phase 1: Laravel Pint (Code Formatting)
 
 ### Installation
@@ -68,6 +106,8 @@ Create `phpstan.neon` in project root:
 ```neon
 includes:
     - vendor/larastan/larastan/extension.neon
+    # Include baseline after generating it:
+    # - phpstan-baseline.neon
 
 parameters:
     paths:
@@ -79,12 +119,19 @@ parameters:
     # Start with level 5 (moderate strictness)
     level: 5
     
+    # Cache directory for performance
+    tmpDir: storage/phpstan
+    
+    # Ignore errors from third-party code
+    excludePaths:
+        - vendor/
+        - bootstrap/cache/
+        - storage/
+        - public/
+    
     ignoreErrors:
         - '#PHPDoc tag @var#'
     
-    excludePaths:
-        - ./*/*/FileToIgnore.php
-
     checkMissingIterableValueType: false
 ```
 
@@ -97,10 +144,52 @@ For existing projects with many errors, generate a baseline:
 ./vendor/bin/phpstan analyse --memory-limit=2G --generate-baseline phpstan-baseline.neon app
 
 # Include baseline in phpstan.neon
-# Add this line to phpstan.neon:
-# includes:
-#     - phpstan-baseline.neon
+# Add this line to phpstan.neon includes section:
+# - phpstan-baseline.neon
 ```
+
+### Baseline Management
+
+Baselines allow you to gradually improve code quality without blocking development.
+
+**Initial Baseline Generation:**
+```bash
+# Generate baseline for entire codebase
+./vendor/bin/phpstan analyse --memory-limit=2G --generate-baseline phpstan-baseline.neon app
+```
+
+**Updating Baseline Incrementally:**
+1. Fix issues in specific files/directories
+2. Remove fixed issues from baseline:
+   ```bash
+   # Re-run analysis - it will show fewer errors
+   ./vendor/bin/phpstan analyse --memory-limit=2G
+   
+   # Regenerate baseline to remove fixed issues
+   ./vendor/bin/phpstan analyse --memory-limit=2G --generate-baseline phpstan-baseline.neon app
+   ```
+
+**Baseline Best Practices:**
+- ✅ Fix issues when you touch files (don't fix unrelated code)
+- ✅ Remove fixed issues from baseline regularly
+- ✅ Track baseline size reduction over time
+- ✅ Don't add new issues to baseline (fix them immediately)
+- ✅ Review baseline file occasionally to see what's left
+
+**Tracking Progress:**
+```bash
+# Count issues in baseline (approximate)
+grep -c "message:" phpstan-baseline.neon
+
+# Or check baseline file size
+ls -lh phpstan-baseline.neon
+```
+
+**When to Regenerate Baseline:**
+- After fixing a batch of issues
+- When baseline file becomes too large
+- When you've fixed all issues in a specific directory
+- Monthly cleanup sessions
 
 ### Usage
 
@@ -110,6 +199,9 @@ For existing projects with many errors, generate a baseline:
 
 # Check specific file
 ./vendor/bin/phpstan analyse --memory-limit=2G app/Http/Controllers/UserController.php
+
+# Check specific directory
+./vendor/bin/phpstan analyse --memory-limit=2G app/Http/Controllers
 
 # Update baseline (after fixing issues)
 ./vendor/bin/phpstan analyse --memory-limit=2G --generate-baseline phpstan-baseline.neon app
@@ -241,14 +333,158 @@ git commit -m "Test pre-commit hook"
 
 ## Phase 4: Optional Enhancements
 
-### Codacy Compliance (Project-Specific)
+### Codacy Compliance Checker
 
-If your project uses Codacy, create custom artisan commands to check compliance:
+Codacy compliance checks help catch security issues and code quality problems before they reach production.
+
+**What Codacy Checks For:**
+- **Security Issues**: Shell execution functions (`exec()`, `shell_exec()`, `system()`, `passthru()`, `proc_open()`)
+- **Type Checking**: `gettype()` usage (should use `is_*` functions instead)
+- **Code Quality**: Implicit boolean comparisons, leading `!` operators
+- **Best Practices**: Unsafe function usage patterns
+
+**Create Codacy Compliance Command:**
 
 ```bash
-# Example artisan command structure
 php artisan make:command CheckCodacyCompliance
 ```
+
+**Implementation Example:**
+
+```php
+<?php
+
+namespace App\Console\Commands;
+
+use Illuminate\Console\Command;
+
+class CheckCodacyCompliance extends Command
+{
+    protected $signature = 'check:codacy-compliance {path?}';
+    protected $description = 'Check PHP files for Codacy compliance issues';
+
+    public function handle()
+    {
+        $path = $this->argument('path') ?: app_path();
+        $issues = [];
+        
+        // Check for shell execution functions
+        $shellFunctions = ['exec', 'shell_exec', 'system', 'passthru', 'proc_open'];
+        // Check for gettype() usage
+        // Check for implicit boolean comparisons
+        // Check for leading ! operators
+        
+        // Report findings
+        if (empty($issues)) {
+            $this->info('✅ No Codacy compliance issues found');
+            return 0;
+        }
+        
+        foreach ($issues as $issue) {
+            $this->error("❌ {$issue['file']}: {$issue['message']}");
+        }
+        
+        return 1;
+    }
+}
+```
+
+**Create Critical Issues Checker:**
+
+```bash
+php artisan make:command CheckCodacyCritical
+```
+
+This checks only Priority 1 (Critical) issues like security vulnerabilities.
+
+**Usage:**
+
+```bash
+# Check all files
+php artisan check:codacy-compliance
+
+# Check specific directory
+php artisan check:codacy-compliance app/Services
+
+# Check single file
+php artisan check:codacy-compliance app/Http/Controllers/UserController.php
+
+# Check only critical issues
+php artisan check:codacy-critical
+```
+
+**Integration with Pre-Commit:**
+
+Add to your pre-commit hook (see Phase 3):
+```bash
+# In pre-commit hook, after Pint check:
+if php artisan check:codacy-compliance "$FILE" > /dev/null 2>&1; then
+    echo "  ✅ $FILE"
+else
+    echo "  ❌ $FILE - Codacy issues found"
+    php artisan check:codacy-compliance "$FILE"
+    exit 1
+fi
+```
+
+### Blade Property Access Checker
+
+Blade property checker ensures PHP 8.4+ compatibility by checking for unsafe property access patterns in Blade templates.
+
+**What It Checks:**
+- Unsafe property access on `stdClass` objects (from `DB::table()` queries)
+- Missing null coalescing operators on potentially null objects
+- **Note**: Eloquent models are safe and don't need null coalescing
+
+**Create Blade Property Checker Command:**
+
+```bash
+php artisan make:command CheckBladePropertyAccess
+```
+
+**Implementation Example:**
+
+```php
+<?php
+
+namespace App\Console\Commands;
+
+use Illuminate\Console\Command;
+
+class CheckBladePropertyAccess extends Command
+{
+    protected $signature = 'check:blade-properties {--path=resources/views}';
+    protected $description = 'Check Blade files for unsafe property access patterns';
+
+    public function handle()
+    {
+        $path = $this->option('path');
+        // Scan Blade files for unsafe patterns
+        // Report issues with file and line numbers
+        
+        return 0;
+    }
+}
+```
+
+**Usage:**
+
+```bash
+# Check all Blade files
+php artisan check:blade-properties
+
+# Check specific directory
+php artisan check:blade-properties --path=resources/views/quotes
+
+# Check specific view
+php artisan check:blade-properties --path=resources/views/providers/edit.blade.php
+```
+
+**Important Notes:**
+- **Eloquent Models**: Files like `$quote->id` are safe (Eloquent models handle nulls)
+- **stdClass Objects**: Files like `$result->field` from `DB::table()` need `$result->field ?? ''`
+- The checker is directory-based, not file-based (for performance)
+- Use manually or in CI/CD, not typically in pre-commit (can be slow)
 
 ### IDE Helper (Optional)
 
@@ -339,6 +575,281 @@ When implementing in a project, track your progress:
 - [ ] Baseline generated (if existing project)
 - [ ] Pre-commit hook created and tested
 - [ ] All checks passing
+
+---
+
+## CI/CD Integration
+
+Integrating code quality checks into your CI/CD pipeline ensures all code meets standards before merging.
+
+### GitHub Actions Example
+
+Create `.github/workflows/code-quality.yml`:
+
+```yaml
+name: Code Quality Checks
+
+on:
+  pull_request:
+    branches: [ main, develop ]
+  push:
+    branches: [ main, develop ]
+
+jobs:
+  code-quality:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: mbstring, xml, curl, bcmath, json
+          coverage: none
+      
+      - name: Install Dependencies
+        run: composer install --prefer-dist --no-progress
+      
+      - name: Run Pint
+        run: ./vendor/bin/pint --test
+      
+      - name: Run PHPStan
+        run: ./vendor/bin/phpstan analyse --memory-limit=2G --error-format=github
+        continue-on-error: true
+      
+      - name: Run Codacy Compliance Check
+        run: php artisan check:codacy-compliance
+        continue-on-error: true
+      
+      - name: Run Blade Property Check
+        run: php artisan check:blade-properties
+        continue-on-error: true
+```
+
+### GitLab CI Example
+
+Create `.gitlab-ci.yml` (add to existing file):
+
+```yaml
+code-quality:
+  stage: test
+  image: php:8.3-cli
+  before_script:
+    - apt-get update -qq && apt-get install -y -qq git unzip
+    - curl -sS https://getcomposer.org/installer | php
+    - php composer.phar install --prefer-dist --no-progress
+  script:
+    - ./vendor/bin/pint --test
+    - ./vendor/bin/phpstan analyse --memory-limit=2G
+    - php artisan check:codacy-compliance
+  only:
+    - merge_requests
+    - main
+    - develop
+```
+
+### Best Practices for CI/CD
+
+**Performance:**
+- Run Pint check first (fastest)
+- Run PHPStan with memory limit
+- Use `continue-on-error: true` for warnings (not failures)
+- Cache Composer dependencies between runs
+
+**Blocking vs Warning:**
+- **Block merges**: Pint failures, PHP syntax errors
+- **Warn but allow**: PHPStan issues (if using baseline), Codacy non-critical issues
+
+**Configuration:**
+```yaml
+# Block on critical issues only
+- name: Run Codacy Critical Check
+  run: php artisan check:codacy-critical
+  # No continue-on-error - this should block
+
+# Warn on other issues
+- name: Run Codacy Full Check
+  run: php artisan check:codacy-compliance
+  continue-on-error: true
+```
+
+**Full Analysis in CI:**
+- Run PHPStan on entire codebase (not just changed files)
+- This catches issues that might not be in staged files locally
+- Use `--error-format=github` for better GitHub integration
+
+### Environment Variables
+
+```yaml
+env:
+  PHPSTAN_MEMORY_LIMIT: 2G
+  SKIP_PHPSTAN: false  # Set to true to skip in CI
+```
+
+---
+
+## Troubleshooting
+
+Common issues and solutions when setting up code quality tools.
+
+### Pint Issues
+
+**Error: "Pint not found"**
+```bash
+# Solution: Install Pint
+composer require --dev laravel/pint
+
+# Verify installation
+./vendor/bin/pint --version
+```
+
+**Error: "Permission denied"**
+```bash
+# Solution: Make Pint executable
+chmod +x vendor/bin/pint
+```
+
+**Pint fixes too many files at once**
+```bash
+# Run on specific directory first
+./vendor/bin/pint app/Http/Controllers
+
+# Or file by file
+./vendor/bin/pint app/Http/Controllers/UserController.php
+```
+
+### PHPStan Issues
+
+**Error: "Out of memory"**
+```bash
+# Solution: Increase memory limit
+./vendor/bin/phpstan analyse --memory-limit=4G
+
+# Or set in phpstan.neon
+parameters:
+    memoryLimitFile: 4G
+```
+
+**Error: "Too many errors"**
+```bash
+# Solution: Generate baseline first
+./vendor/bin/phpstan analyse --memory-limit=2G --generate-baseline phpstan-baseline.neon app
+
+# Then include baseline in phpstan.neon
+```
+
+**PHPStan is slow**
+```bash
+# Solution: Use cache directory
+# Add to phpstan.neon:
+parameters:
+    tmpDir: storage/phpstan
+
+# Clear cache if needed
+rm -rf storage/phpstan
+```
+
+**"Command not found" errors**
+```bash
+# Solution: Use full path or check vendor/bin
+./vendor/bin/phpstan analyse
+
+# Or check if installed
+composer show phpstan/phpstan
+```
+
+### Pre-Commit Hook Issues
+
+**Hook not running**
+```bash
+# Solution: Check if file exists and is executable
+ls -la .git/hooks/pre-commit
+chmod +x .git/hooks/pre-commit
+
+# Test manually
+.git/hooks/pre-commit
+```
+
+**Hook runs but fails silently**
+```bash
+# Solution: Add error handling (use set -e in script)
+# Check hook output
+git commit -m "test" 2>&1 | tee hook-output.txt
+```
+
+**"Permission denied" on hook**
+```bash
+# Solution: Make executable
+chmod +x .git/hooks/pre-commit
+
+# Verify permissions
+ls -la .git/hooks/pre-commit
+# Should show: -rwxr-xr-x
+```
+
+**Hook blocks all commits**
+```bash
+# Temporary bypass (use carefully!)
+git commit --no-verify -m "Emergency fix"
+
+# Then fix the hook issue
+```
+
+**Hook too slow**
+```bash
+# Solution: Check only staged files (already done)
+# Disable slow checks temporarily by commenting out in hook
+# Or increase PHPStan memory limit
+```
+
+### Codacy Issues
+
+**"Command not found: check:codacy-compliance"**
+```bash
+# Solution: Create the artisan command
+php artisan make:command CheckCodacyCompliance
+
+# Then implement the command (see Phase 4)
+```
+
+**Too many false positives**
+```bash
+# Solution: Adjust what the command checks
+# Or use only critical issues checker
+php artisan check:codacy-critical
+```
+
+### General Issues
+
+**Composer autoload issues**
+```bash
+# Solution: Regenerate autoload
+composer dump-autoload
+```
+
+**Version conflicts**
+```bash
+# Solution: Check composer.json for version constraints
+# Update to compatible versions
+composer update phpstan/phpstan larastan/larastan
+```
+
+**Windows/WSL issues**
+```bash
+# Solution: Use WSL2 for bash scripts
+# Or convert hook to PowerShell (Windows)
+# Or use pre-commit framework (cross-platform)
+```
+
+### Getting Help
+
+If you encounter issues not covered here:
+1. Check the tool's documentation
+2. Review the reference implementation: `Moveroo-Cars-2026/docs/code-quality-improvements-plan.md`
+3. Check GitHub issues for the specific tool
+4. Verify your PHP/Laravel versions match requirements
 
 ---
 
