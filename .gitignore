@@ -1,0 +1,11 @@
+# Ignore all project subdirectories (they're their own git repos)
+# Only track shared documentation and configuration files
+*/
+
+# But don't ignore these files
+!.gitignore
+!README.md
+!code-quality-standards-guide.md
+
+# Ignore cursor AI rules
+.cursor/rules/codacy.mdc
