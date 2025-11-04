@@ -23,7 +23,9 @@ Before starting, ensure your environment meets these requirements:
 
 ### Required Versions
 - **PHP**: 8.2 or higher (8.3+ recommended)
-- **Laravel**: 10.x or 11.x (Laravel 12+ also supported)
+- **Laravel**: 12.36.1+ (recommended base point, tested with Moveroo-Cars-2026)
+  - Laravel 10.x, 11.x also supported
+  - Laravel 12.x recommended for new projects
 - **Composer**: 2.x
 - **Git**: 2.x
 
@@ -50,7 +52,9 @@ git --version
 
 ### Compatibility Notes
 - **PHP 8.1**: May work but not recommended; some features require PHP 8.2+
+- **Laravel 12.36.1**: Recommended base point (tested and verified with Moveroo-Cars-2026)
 - **Laravel 9.x**: Should work, but Laravel 10+ is recommended
+- **Laravel 10.x/11.x**: Supported, but Laravel 12+ recommended for best compatibility
 - **Windows**: Use WSL2 for best compatibility with bash scripts (pre-commit hooks)
 
 ---
