@@ -7,7 +7,7 @@ This directory contains all git repositories consolidated from various locations
 - **Laravel projects** are in `~/Projects/laravel-projects/`
 - **Non-Laravel projects** are in `~/Projects/non-laravel-projects/`
 - **Old/inactive repositories** are in `~/Projects/Archive/`
-- **Shared documentation** is in the root directory
+- **Code Quality Standards Guide** is in `~/Projects/laravel-projects/code-quality-standards-guide.md`
 
 ## Repository List
 
