@@ -7,5 +7,10 @@
 !README.md
 !code-quality-standards-guide.md
 
+# Allow the code quality guide in laravel-projects folder
+!laravel-projects/
+laravel-projects/*
+!laravel-projects/code-quality-standards-guide.md
+
 # Ignore cursor AI rules
 .cursor/rules/codacy.mdc
