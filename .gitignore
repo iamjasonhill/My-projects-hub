@@ -13,6 +13,7 @@ laravel-projects/*
 !laravel-projects/code-quality-standards-guide.md
 !laravel-projects/BASELINE-TRACKING.md
 !laravel-projects/check-baseline.sh
+!laravel-projects/CENTRALIZED_LARAVEL_MANAGEMENT_DISCUSSION.md
 
 # Ignore cursor AI rules
 .cursor/rules/codacy.mdc
