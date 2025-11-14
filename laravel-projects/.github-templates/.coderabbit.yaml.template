@@ -1,0 +1,52 @@
+# CodeRabbit Configuration
+# This file configures CodeRabbit to review PRs created by the auto-PR workflow
+# Install: Copy this file to your project root as .coderabbit.yaml
+
+reviews:
+  # Review draft PRs (if any are created as drafts)
+  draft: true
+  
+  # Show review status in PR comments
+  review_status: true
+  
+  # Auto-review settings
+  auto_review: true
+  require_approvals: 1
+  
+  # Don't ignore any usernames - review all PRs
+  # This ensures PRs created by the PAT token (your username) are reviewed
+  ignore_usernames: []
+  
+  # Paths to include in reviews
+  paths_include:
+    - "app/**"
+    - "database/**"
+    - "resources/views/**"
+    - "routes/**"
+    - "tests/**"
+  
+  # Paths to exclude from reviews
+  paths_exclude:
+    - "public/build/**"
+    - "storage/**"
+    - "vendor/**"
+  
+  suggestion_limit: 200
+  inline: true
+
+  auto_title_instructions: |
+    Use clear, concise titles that summarize the main change in the pull request.
+    Avoid generic titles like "fix" or "update".
+    Mention the key component or feature touched by the change.
+  
+  # Review PRs with these labels
+  labels:
+    - "auto-pr"
+    - "needs-review"
+    - "dev-to-main"
+    - "dependencies"
+    - "npm"
+    - "composer"
+    - "ci"
+    - "review: ai"
+

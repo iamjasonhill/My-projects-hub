@@ -1,0 +1,226 @@
+name: Auto-Create PR from {{HEAD_BRANCH}} to {{BASE_BRANCH}}
+
+on:
+  push:
+    branches: [ {{HEAD_BRANCH}} ]
+  workflow_dispatch:
+
+concurrency:
+  group: auto-pr-{{HEAD_BRANCH}}-to-{{BASE_BRANCH}}
+  cancel-in-progress: true
+
+env:
+  BASE_BRANCH: {{BASE_BRANCH}}
+  HEAD_BRANCH: {{HEAD_BRANCH}}
+
+jobs:
+  create-pr:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+
+    steps:
+      - name: Check for existing PR
+        id: check-pr
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const {owner, repo} = context.repo;
+            try {
+              const { data: prs } = await github.rest.pulls.list({
+                owner, repo, state: 'open',
+                head: `${owner}:${process.env.HEAD_BRANCH}`,
+                base: process.env.BASE_BRANCH
+              });
+              
+              if (prs.length) {
+                const pr = prs[0];
+                core.setOutput('pr_exists', 'true');
+                core.setOutput('pr_number', pr.number.toString());
+                core.setOutput('pr_url', pr.html_url);
+                core.setOutput('current_title', pr.title || '');
+                core.setOutput('current_body', pr.body || '');
+                core.setOutput('is_draft', pr.draft ? 'true' : 'false');
+                console.log(`✅ Found PR #${pr.number}`);
+              } else {
+                core.setOutput('pr_exists', 'false');
+                console.log('ℹ️ No existing PR found');
+              }
+            } catch (error) {
+              console.log(`⚠️ Error checking PR: ${error.message}`);
+              core.setOutput('pr_exists', 'false');
+            }
+
+      - name: Compute PR title/body
+        id: meta
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const {owner, repo} = context.repo;
+            try {
+              // Compare commits between base...head to build a smart title/body
+              const cmp = await github.rest.repos.compareCommitsWithBasehead({ 
+                owner, repo, 
+                basehead: `${process.env.BASE_BRANCH}...${process.env.HEAD_BRANCH}` 
+              });
+              
+              const commits = (cmp.data.commits || []).map(c => ({
+                sha: c.sha.substring(0,7),
+                msg: (c.commit && c.commit.message ? c.commit.message.trim() : ''),
+                author: (c.author && c.author.login) || (c.commit && c.commit.author && c.commit.author.name) || 'unknown'
+              })).filter(c => !!c.msg);
+
+              function firstLine(s){ return (s || '').split('\n')[0].trim(); }
+              function isMerge(m){ return /^Merge\s/i.test(m); }
+              function preferMsg(m){
+                // prefer non-merge, non-chore first lines
+                const f = firstLine(m);
+                if (/^(chore|build|ci|docs|refactor|style|test)(\(|:)/i.test(f)) return null;
+                if (isMerge(f)) return null;
+                return f.length >= 8 ? f : null;
+              }
+
+              const preferred = commits.map(c => preferMsg(c.msg)).filter(Boolean);
+              const fallback = commits.map(c => firstLine(c.msg)).filter(m => !isMerge(m));
+              
+              let title = preferred[0] || fallback[0] || `${process.env.HEAD_BRANCH} to ${process.env.BASE_BRANCH}: ${new Date().toISOString().slice(0,10)}`;
+              
+              // Clean up title
+              title = title
+                .replace(/^(feat|fix|docs|style|refactor|perf|test|chore|ci|build|revert):\s*/i,'')
+                .replace(/^\[.*?\]\s*/, '')
+                .replace(/^Merge branch .* into .*/i, '')
+                .trim();
+              
+              if (!title.toLowerCase().includes(process.env.HEAD_BRANCH.toLowerCase())) {
+                title = `${process.env.HEAD_BRANCH} → ${process.env.BASE_BRANCH}: ${title}`;
+              }
+              
+              // Better truncation logic
+              if (title.length > 100) {
+                const truncated = title.substring(0, 97);
+                const lastSpace = truncated.lastIndexOf(' ');
+                title = (lastSpace > 50) 
+                  ? truncated.substring(0, lastSpace) + '...'
+                  : truncated + '...';
+              }
+
+              const compareUrl = `https://github.com/${owner}/${repo}/compare/${process.env.BASE_BRANCH}...${process.env.HEAD_BRANCH}`;
+              const bullet = commits.map(c => `- ${firstLine(c.msg)} (${c.sha}, by ${c.author})`).join('\n');
+              
+              const body = [
+                `## 🚀 Automated PR from ${process.env.HEAD_BRANCH} to ${process.env.BASE_BRANCH}`,
+                ``,
+                `**Summary of changes since \`${process.env.BASE_BRANCH}\`:**`,
+                bullet || '- No commit messages found.',
+                ``,
+                `**Compare:** ${compareUrl}`,
+                ``,
+                `### ✅ Automated Checks`,
+                `- CI/CD Pipeline (tests, linting, etc.)`,
+                `- Codacy Static Analysis`,
+                `- CodeRabbit AI Code Review`,
+                ``,
+                `### 📋 Review Checklist`,
+                `- [ ] CI checks pass`,
+                `- [ ] Migrations tested (if any)`,
+                `- [ ] Env changes documented (if any)`,
+                `- [ ] No breaking changes, or noted`,
+                ``,
+                `*Last updated: ${new Date().toISOString()}*`
+              ].join('\n');
+
+              core.setOutput('title', title);
+              core.setOutput('body', body);
+            } catch (error) {
+              console.log(`⚠️ Error computing PR metadata: ${error.message}`);
+              const date = new Date().toISOString().slice(0,10);
+              core.setOutput('title', `${process.env.HEAD_BRANCH} → ${process.env.BASE_BRANCH}: ${date}`);
+              core.setOutput('body', `## Automated PR\n\n*Error getting commit details*`);
+            }
+
+      - name: Create or Update Pull Request
+        uses: actions/github-script@v7
+        with:
+          # Use PAT to make PRs appear as human-authored (prevents CodeRabbit from skipping reviews)
+          # Fallback to GITHUB_TOKEN if PAT not available
+          github-token: ${{ secrets.ACTIONS_PR_TOKEN || secrets.PRDEVMAIN || secrets.GITHUB_TOKEN }}
+          script: |
+            const exists = '${{ steps.check-pr.outputs.pr_exists }}' === 'true';
+            const prNumber = parseInt('${{ steps.check-pr.outputs.pr_number || 0 }}', 10) || null;
+            const isDraft = '${{ steps.check-pr.outputs.is_draft }}' === 'true';
+            const newTitle = `${{ steps.meta.outputs.title }}`;
+            const newBody = `${{ steps.meta.outputs.body }}`;
+            const {owner, repo} = context.repo;
+
+            try {
+              if (exists && prNumber) {
+                const curTitle = `${{ steps.check-pr.outputs.current_title }}`;
+                const curBody = `${{ steps.check-pr.outputs.current_body }}`;
+                
+                // Ensure it is marked as ready (not draft) so CodeRabbit can review it
+                // Use the dedicated ready_for_review endpoint (pulls.update doesn't support draft field)
+                if (isDraft) {
+                  await github.rest.pulls.markReadyForReview({ 
+                    owner, repo, 
+                    pull_number: prNumber 
+                  });
+                  core.info(`✅ Converted PR #${prNumber} from draft to ready for review`);
+                }
+                
+                // Update title/body if changed
+                if (curTitle !== newTitle || curBody !== newBody) {
+                  await github.rest.pulls.update({ 
+                    owner, repo, pull_number: prNumber, 
+                    title: newTitle, body: newBody 
+                  });
+                  console.log(`✅ Updated PR #${prNumber}`);
+                } else {
+                  console.log(`ℹ️ PR #${prNumber} already up to date`);
+                }
+                
+                // Ensure labels applied
+                try {
+                  await github.rest.issues.addLabels({ 
+                    owner, repo, 
+                    issue_number: prNumber, 
+                    labels: ['auto-pr','needs-review'] 
+                  });
+                } catch (e) { 
+                  console.log(`⚠️ Labels skipped: ${e.message}`); 
+                }
+              } else {
+                const { data: pr } = await github.rest.pulls.create({
+                  owner, repo,
+                  title: newTitle,
+                  head: process.env.HEAD_BRANCH,
+                  base: process.env.BASE_BRANCH,
+                  body: newBody,
+                  draft: false  // Create as ready for review so CodeRabbit can review it
+                });
+                
+                try {
+                  await github.rest.issues.addLabels({ 
+                    owner, repo, 
+                    issue_number: pr.number, 
+                    labels: ['auto-pr','needs-review'] 
+                  });
+                } catch (e) { 
+                  console.log(`⚠️ Labels skipped: ${e.message}`); 
+                }
+                
+                console.log(`✅ Created PR #${pr.number}: ${pr.html_url}`);
+                core.setOutput('pr_url', pr.html_url);
+                core.setOutput('pr_number', pr.number.toString());
+              }
+            } catch (error) {
+              if (error.message.includes('not permitted')) {
+                core.setFailed(`❌ Permission denied. Check workflow permissions in Settings > Actions > General`);
+              } else {
+                core.setFailed(`❌ Failed to create/update PR: ${error.message}`);
+              }
+              throw error;
+            }
+
