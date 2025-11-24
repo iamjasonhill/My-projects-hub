@@ -21,12 +21,13 @@ echo ""
 # Get list of staged files
 STAGED_PHP_FILES=$(git diff --cached --name-only --diff-filter=ACM | grep -E '\.php$' || true)
 STAGED_BLADE_FILES=$(git diff --cached --name-only --diff-filter=ACM | grep -E '\.blade\.php$' || true)
+STAGED_FILES=$(git diff --cached --name-only --diff-filter=ACM || true)
 
 HAS_ERRORS=false
 
 # Check if there are any staged files to check
-if [ -z "$STAGED_PHP_FILES" ] && [ -z "$STAGED_BLADE_FILES" ]; then
-    echo -e "${YELLOW}No PHP or Blade files staged for commit. Skipping checks.${NC}"
+if [ -z "$STAGED_FILES" ]; then
+    echo -e "${YELLOW}No files staged for commit. Skipping checks.${NC}"
     exit 0
 fi
 
@@ -259,39 +260,27 @@ echo -e "  ${YELLOW}ℹ️  PHPStan runs automatically in GitHub Actions and bef
 echo -e "  ${YELLOW}   Run manually: ./vendor/bin/phpstan analyse --memory-limit=2G${NC}"
 echo ""
 
-# 9. CodeRabbit CLI Check (AI Code Review) - OPTIONAL
-echo -e "${BLUE}9. Running CodeRabbit AI code review...${NC}"
-if [ -n "$STAGED_PHP_FILES" ] || [ -n "$STAGED_BLADE_FILES" ]; then
-    if command -v coderabbit > /dev/null 2>&1; then
-        # Check if CodeRabbit is enabled via environment variable (default: disabled)
-        if [ "${ENABLE_CODERABBIT_PRE_COMMIT:-false}" = "true" ]; then
-            echo -e "  ${BLUE}Running CodeRabbit review (this may take 1-3 minutes)...${NC}"
-            # Run CodeRabbit on uncommitted changes (staged files)
-            CODERABBIT_OUTPUT=$(timeout 180 coderabbit --prompt-only -t uncommitted 2>&1 || true)
-            
-            # Check if authentication is needed
-            if echo "$CODERABBIT_OUTPUT" | grep -qiE "not authenticated|authentication|login|Please login" 2>/dev/null; then
-                echo -e "  ${YELLOW}⚠️  CodeRabbit not authenticated. Skipping review.${NC}"
-                echo -e "  ${YELLOW}   Authenticate with: coderabbit auth login${NC}"
-            # Check if rate limit is hit (don't block commit on rate limits)
-            elif echo "$CODERABBIT_OUTPUT" | grep -qiE "rate limit|limit exceeded|quota" 2>/dev/null; then
-                echo -e "  ${YELLOW}⚠️  CodeRabbit rate limit exceeded. Skipping review for this commit.${NC}"
-                echo -e "  ${YELLOW}   CodeRabbit has a limit of checks per hour. This commit will proceed.${NC}"
-            else
-                echo -e "  ${GREEN}✅ CodeRabbit review completed${NC}"
-                # Don't block commit - CodeRabbit also runs on PRs
-            fi
+# 9. CodeRabbit CLI Check (AI Code Review) - DISABLED
+# CodeRabbit runs automatically on PRs, so pre-commit hook is disabled by default
+# To enable: export ENABLE_CODERABBIT_PRE_COMMIT=true
+echo -e "${BLUE}9. CodeRabbit check skipped (runs automatically on PRs)${NC}"
+if [ "${ENABLE_CODERABBIT_PRE_COMMIT:-false}" = "true" ]; then
+    if [ -n "$STAGED_FILES" ]; then
+        if command -v coderabbit > /dev/null 2>&1; then
+            echo -e "  ${BLUE}CodeRabbit pre-commit enabled via ENABLE_CODERABBIT_PRE_COMMIT=true${NC}"
+            echo -e "  ${YELLOW}   Running CodeRabbit review...${NC}"
+            # Run CodeRabbit in background (non-blocking)
+            (
+                coderabbit --prompt-only -t uncommitted > /tmp/coderabbit-review-$$.log 2>&1
+            ) &
+            echo -e "  ${GREEN}✅ CodeRabbit started (PID: $!)${NC}"
         else
-            echo -e "  ${YELLOW}⚠️  CodeRabbit pre-commit check is disabled (runs automatically on PRs)${NC}"
-            echo -e "  ${YELLOW}   To enable: export ENABLE_CODERABBIT_PRE_COMMIT=true${NC}"
-            echo -e "  ${YELLOW}   Or run manually: coderabbit --prompt-only -t uncommitted${NC}"
+            echo -e "  ${YELLOW}⚠️  CodeRabbit CLI not found${NC}"
         fi
-    else
-        echo -e "  ${YELLOW}⚠️  CodeRabbit CLI not found. Skipping AI code review.${NC}"
-        echo -e "  ${YELLOW}   Install with: curl -fsSL https://cli.coderabbit.ai/install.sh | sh${NC}"
     fi
 else
-    echo -e "  ${YELLOW}⚠️  No files staged for review${NC}"
+    echo -e "  ${YELLOW}ℹ️  CodeRabbit reviews PRs automatically - no need for pre-commit hook${NC}"
+    echo -e "  ${YELLOW}   To enable pre-commit: export ENABLE_CODERABBIT_PRE_COMMIT=true${NC}"
 fi
 echo ""
 
