@@ -24,5 +24,13 @@ laravel-projects/*
 !laravel-projects/scripts/
 !laravel-projects/scripts/**
 
+# Allow the Moveroo Website project
+!non-laravel-projects/
+non-laravel-projects/*
+!non-laravel-projects/Moveroo Website/
+non-laravel-projects/Moveroo Website/*
+!non-laravel-projects/Moveroo Website/moveroowebsite/
+!non-laravel-projects/Moveroo Website/moveroowebsite/**
+
 # Ignore cursor AI rules
 .cursor/rules/codacy.mdc
